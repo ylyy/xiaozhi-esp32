@@ -7,6 +7,7 @@
 #include "config.h"
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
+#include "csi/csi_detector.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -25,6 +26,7 @@ private:
     Button tw_button_;
     Button volume_up_button_;
     Button volume_down_button_;
+    CsiDetector csi_detector_;
 
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
@@ -93,6 +95,24 @@ private:
         });
     }
 
+    void InitializeCsiDetector() {
+        // 等待WiFi初始化完成后再初始化CSI
+        auto& wifi = WifiStation::GetInstance();
+        wifi.OnConnected([this](const std::string& ssid) {
+            ESP_LOGI(TAG, "WiFi connected to %s, initializing CSI detector", ssid.c_str());
+            csi_detector_.Initialize();
+            csi_detector_.OnObjectDetected([this]() {
+                ESP_LOGI(TAG, "CSI detected object, toggling chat state");
+                auto& app = Application::GetInstance();
+                app.Schedule([&app]() {
+                    app.ToggleChatState();
+                });
+            });
+            csi_detector_.StartDetection();
+            ESP_LOGI(TAG, "CSI detection started");
+        });
+    }
+
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
         auto& thing_manager = iot::ThingManager::GetInstance();
@@ -109,6 +129,7 @@ public:
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         InitializeDisplayI2c();
         InitializeButtons();
+        InitializeCsiDetector();
         InitializeIot();
     }
 
