@@ -22,6 +22,7 @@ private:
     i2c_master_bus_handle_t display_i2c_bus_;
     Button boot_button_;
     Button touch_button_;
+    Button tw_button_;
     Button volume_up_button_;
     Button volume_down_button_;
 
@@ -49,6 +50,11 @@ private:
             }
             app.ToggleChatState();
         });
+
+        tw_button_.OnClick([this]() {
+            Application::GetInstance().ToggleChatState();
+        });
+
         touch_button_.OnPressDown([this]() {
             Application::GetInstance().StartListening();
         });
@@ -98,6 +104,7 @@ public:
     CompactWifiBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
         touch_button_(TOUCH_BUTTON_GPIO),
+        tw_button_(TW_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         InitializeDisplayI2c();

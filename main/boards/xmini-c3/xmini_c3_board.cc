@@ -23,6 +23,7 @@ private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
     bool press_to_talk_enabled_ = false;
+    Button spihd_button_;
 
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
@@ -42,7 +43,10 @@ private:
     }
 
     void InitializeButtons() {
+        ESP_LOGI(TAG, "Initializing buttons...");
+        
         boot_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "Boot button clicked");
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
@@ -52,15 +56,28 @@ private:
             }
         });
         boot_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "Boot button pressed down");
             if (press_to_talk_enabled_) {
                 Application::GetInstance().StartListening();
             }
         });
         boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "Boot button released");
             if (press_to_talk_enabled_) {
                 Application::GetInstance().StopListening();
             }
         });
+
+        // 添加 SPIHD 按钮的调试日志
+        ESP_LOGI(TAG, "Setting up SPIHD button on GPIO %d", SPIHD_BUTTON_GPIO);
+        spihd_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "SPIHD button clicked");
+            auto& app = Application::GetInstance();
+            app.Schedule([&app]() {
+                app.HandleWakeWordDetected(app.GetWakeWordDetect().GetLastDetectedWakeWord());
+            });
+        });
+        ESP_LOGI(TAG, "Buttons initialization completed");
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -74,9 +91,20 @@ private:
     }
 
 public:
-    XminiC3Board() : boot_button_(BOOT_BUTTON_GPIO) {  
+    XminiC3Board() : boot_button_(BOOT_BUTTON_GPIO), spihd_button_(SPIHD_BUTTON_GPIO) {  
+        ESP_LOGI(TAG, "Initializing XminiC3Board...");
         // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
         esp_efuse_write_field_bit(ESP_EFUSE_VDD_SPI_AS_GPIO);
+
+        // 初始化 SPIHD 引脚为输入模式
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pin_bit_mask = (1ULL << SPIHD_BUTTON_GPIO);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+        ESP_LOGI(TAG, "Configuring SPIHD GPIO %d as input with pull-up", SPIHD_BUTTON_GPIO);
+        gpio_config(&io_conf);
 
         InitializeCodecI2c();
         InitializeButtons();
