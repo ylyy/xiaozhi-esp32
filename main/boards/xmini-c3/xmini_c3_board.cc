@@ -7,13 +7,22 @@
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
 #include "settings.h"
+#include "rc522_device.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
+#include <driver/spi_master.h>
 
 #define TAG "XminiC3Board"
+
+// RC522 引脚定义 - 使用正确的 GPIO 映射
+#define RC522_PIN_MOSI    GPIO_NUM_12  // IO3/HOLD#（SPIHD）
+#define RC522_PIN_MISO    GPIO_NUM_13  // IO2/WP#（SPIWP）
+
+// 使用 OLED 的 I2C 引脚作为按钮输入
+#define TW_BUTTON_GPIO    DISPLAY_SCL_PIN  // 使用 OLED 的 SCL 引脚作为按钮输入
 
 LV_FONT_DECLARE(font_puhui_14_1);
 LV_FONT_DECLARE(font_awesome_14_1);
@@ -22,8 +31,9 @@ class XminiC3Board : public WifiBoard {
 private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
+    Button tw_button_;  // 使用 OLED 的 SCL 引脚作为按钮
+    Rc522Device* rc522_;
     bool press_to_talk_enabled_ = false;
-    Button spihd_button_;
 
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
@@ -42,6 +52,43 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
     }
 
+    void InitializeRc522() {
+        // 创建RC522设备，使用正确的 GPIO 映射
+        rc522_ = new Rc522Device(RC522_PIN_MOSI, RC522_PIN_MISO);
+        if (!rc522_->Initialize()) {
+            ESP_LOGE(TAG, "Failed to initialize RC522");
+            return;
+        }
+        ESP_LOGI(TAG, "RC522 initialized successfully");
+
+        // 启动RFID卡片检测任务
+        xTaskCreate([](void* arg) {
+            auto board = static_cast<XminiC3Board*>(arg);
+            uint8_t card_type;
+            uint8_t serial_no[5];
+            
+            while (true) {
+                if (board->rc522_->DetectCard(&card_type)) {
+                    if (board->rc522_->ReadCardSerial(serial_no)) {
+                        ESP_LOGI(TAG, "Card detected! Type: 0x%02X", card_type);
+                        ESP_LOGI(TAG, "Serial: %02X:%02X:%02X:%02X:%02X",
+                                serial_no[0], serial_no[1], serial_no[2],
+                                serial_no[3], serial_no[4]);
+                        
+                        // 显示卡片信息
+                        char display_text[64];
+                        snprintf(display_text, sizeof(display_text),
+                                "Card: %02X:%02X:%02X:%02X:%02X",
+                                serial_no[0], serial_no[1], serial_no[2],
+                                serial_no[3], serial_no[4]);
+                        board->GetDisplay()->ShowNotification(display_text);
+                    }
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));  // 100ms检测间隔
+            }
+        }, "rc522_task", 4096, this, 5, nullptr);
+    }
+
     void InitializeButtons() {
         ESP_LOGI(TAG, "Initializing buttons...");
         
@@ -56,27 +103,26 @@ private:
             }
         });
         boot_button_.OnPressDown([this]() {
-            ESP_LOGI(TAG, "Boot button pressed down");
             if (press_to_talk_enabled_) {
                 Application::GetInstance().StartListening();
             }
         });
         boot_button_.OnPressUp([this]() {
-            ESP_LOGI(TAG, "Boot button released");
             if (press_to_talk_enabled_) {
                 Application::GetInstance().StopListening();
             }
         });
 
-        // 添加 SPIHD 按钮的调试日志
-        ESP_LOGI(TAG, "Setting up SPIHD button on GPIO %d", SPIHD_BUTTON_GPIO);
-        spihd_button_.OnClick([this]() {
-            ESP_LOGI(TAG, "SPIHD button clicked");
+        // 配置 TW 按钮（使用 OLED 的 SCL 引脚）
+        ESP_LOGI(TAG, "Setting up TW button on GPIO %d", TW_BUTTON_GPIO);
+        tw_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "TW button clicked");
             auto& app = Application::GetInstance();
             app.Schedule([&app]() {
                 app.HandleWakeWordDetected(app.GetWakeWordDetect().GetLastDetectedWakeWord());
             });
         });
+        
         ESP_LOGI(TAG, "Buttons initialization completed");
     }
 
@@ -91,24 +137,31 @@ private:
     }
 
 public:
-    XminiC3Board() : boot_button_(BOOT_BUTTON_GPIO), spihd_button_(SPIHD_BUTTON_GPIO) {  
+    XminiC3Board() : boot_button_(BOOT_BUTTON_GPIO), tw_button_(TW_BUTTON_GPIO) {  
         ESP_LOGI(TAG, "Initializing XminiC3Board...");
         // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
         esp_efuse_write_field_bit(ESP_EFUSE_VDD_SPI_AS_GPIO);
 
-        // 初始化 SPIHD 引脚为输入模式
+        // 初始化 TW 按钮引脚为输入模式
         gpio_config_t io_conf = {};
         io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << SPIHD_BUTTON_GPIO);
+        io_conf.pin_bit_mask = (1ULL << TW_BUTTON_GPIO);
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        ESP_LOGI(TAG, "Configuring SPIHD GPIO %d as input with pull-up", SPIHD_BUTTON_GPIO);
+        ESP_LOGI(TAG, "Configuring TW button GPIO %d as input with pull-up", TW_BUTTON_GPIO);
         gpio_config(&io_conf);
 
         InitializeCodecI2c();
+        InitializeRc522();
         InitializeButtons();
         InitializeIot();
+    }
+
+    ~XminiC3Board() {
+        if (rc522_) {
+            delete rc522_;
+        }
     }
 
     virtual Led* GetLed() override {
