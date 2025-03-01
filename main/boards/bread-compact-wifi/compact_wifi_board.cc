@@ -8,12 +8,18 @@
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
 #include "csi/csi_detector.h"
+#include "rc522_device.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <driver/i2c_master.h>
+#include <driver/spi_master.h>
 
 #define TAG "CompactWifiBoard"
+
+// RC522 引脚定义 - 使用软件 SPI
+#define RC522_PIN_MOSI    GPIO_NUM_11
+#define RC522_PIN_MISO    GPIO_NUM_12
 
 LV_FONT_DECLARE(font_puhui_14_1);
 LV_FONT_DECLARE(font_awesome_14_1);
@@ -27,6 +33,7 @@ private:
     Button volume_up_button_;
     Button volume_down_button_;
     CsiDetector csi_detector_;
+    Rc522Device* rc522_;
 
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
@@ -42,6 +49,43 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &display_i2c_bus_));
+    }
+
+    void InitializeRc522() {
+        // 创建RC522设备，使用软件 SPI
+        rc522_ = new Rc522Device(RC522_PIN_MOSI, RC522_PIN_MISO);
+        if (!rc522_->Initialize()) {
+            ESP_LOGE(TAG, "Failed to initialize RC522");
+            return;
+        }
+        ESP_LOGI(TAG, "RC522 initialized successfully");
+
+        // 启动RFID卡片检测任务
+        xTaskCreate([](void* arg) {
+            auto board = static_cast<CompactWifiBoard*>(arg);
+            uint8_t card_type;
+            uint8_t serial_no[5];
+            
+            while (true) {
+                if (board->rc522_->DetectCard(&card_type)) {
+                    if (board->rc522_->ReadCardSerial(serial_no)) {
+                        ESP_LOGI(TAG, "Card detected! Type: 0x%02X", card_type);
+                        ESP_LOGI(TAG, "Serial: %02X:%02X:%02X:%02X:%02X",
+                                serial_no[0], serial_no[1], serial_no[2],
+                                serial_no[3], serial_no[4]);
+                        
+                        // 显示卡片信息
+                        char display_text[64];
+                        snprintf(display_text, sizeof(display_text),
+                                "Card: %02X:%02X:%02X:%02X:%02X",
+                                serial_no[0], serial_no[1], serial_no[2],
+                                serial_no[3], serial_no[4]);
+                        board->GetDisplay()->ShowNotification(display_text);
+                    }
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));  // 100ms检测间隔
+            }
+        }, "rc522_task", 4096, this, 5, nullptr);
     }
 
     void InitializeButtons() {
@@ -128,9 +172,16 @@ public:
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         InitializeDisplayI2c();
+        InitializeRc522();
         InitializeButtons();
         InitializeCsiDetector();
         InitializeIot();
+    }
+
+    ~CompactWifiBoard() {
+        if (rc522_) {
+            delete rc522_;
+        }
     }
 
     virtual Led* GetLed() override {
