@@ -1,3 +1,5 @@
+#define ENABLE_BLE_SHUTTER 1  // 启用BLE功能
+
 #include "wifi_board.h"
 #include "audio_codecs/es8311_audio_codec.h"
 #include "display/ssd1306_display.h"
@@ -7,7 +9,11 @@
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
 #include "settings.h"
-#include "rc522_device.h"
+
+// 有条件地包含BLE头文件
+#if ENABLE_BLE_SHUTTER
+#include "../../ble_shutter_demo.h"
+#endif
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -17,12 +23,8 @@
 
 #define TAG "XminiC3Board"
 
-// RC522 引脚定义 - 使用正确的 GPIO 映射
-#define RC522_PIN_MOSI    GPIO_NUM_12  // IO3/HOLD#（SPIHD）
-#define RC522_PIN_MISO    GPIO_NUM_13  // IO2/WP#（SPIWP）
-
 // 使用 OLED 的 I2C 引脚作为按钮输入
-#define TW_BUTTON_GPIO    DISPLAY_SCL_PIN  // 使用 OLED 的 SCL 引脚作为按钮输入
+#define TW_BUTTON_GPIO    GPIO_NUM_9  // 使用实际的GPIO引脚号替代DISPLAY_SCL_PIN
 
 LV_FONT_DECLARE(font_puhui_14_1);
 LV_FONT_DECLARE(font_awesome_14_1);
@@ -32,9 +34,8 @@ private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
     Button tw_button_;  // 使用 OLED 的 SCL 引脚作为按钮
-    Rc522Device* rc522_;
     bool press_to_talk_enabled_ = false;
-
+    
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -50,43 +51,6 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
-    }
-
-    void InitializeRc522() {
-        // 创建RC522设备，使用正确的 GPIO 映射
-        rc522_ = new Rc522Device(RC522_PIN_MOSI, RC522_PIN_MISO);
-        if (!rc522_->Initialize()) {
-            ESP_LOGE(TAG, "Failed to initialize RC522");
-            return;
-        }
-        ESP_LOGI(TAG, "RC522 initialized successfully");
-
-        // 启动RFID卡片检测任务
-        xTaskCreate([](void* arg) {
-            auto board = static_cast<XminiC3Board*>(arg);
-            uint8_t card_type;
-            uint8_t serial_no[5];
-            
-            while (true) {
-                if (board->rc522_->DetectCard(&card_type)) {
-                    if (board->rc522_->ReadCardSerial(serial_no)) {
-                        ESP_LOGI(TAG, "Card detected! Type: 0x%02X", card_type);
-                        ESP_LOGI(TAG, "Serial: %02X:%02X:%02X:%02X:%02X",
-                                serial_no[0], serial_no[1], serial_no[2],
-                                serial_no[3], serial_no[4]);
-                        
-                        // 显示卡片信息
-                        char display_text[64];
-                        snprintf(display_text, sizeof(display_text),
-                                "Card: %02X:%02X:%02X:%02X:%02X",
-                                serial_no[0], serial_no[1], serial_no[2],
-                                serial_no[3], serial_no[4]);
-                        board->GetDisplay()->ShowNotification(display_text);
-                    }
-                }
-                vTaskDelay(pdMS_TO_TICKS(100));  // 100ms检测间隔
-            }
-        }, "rc522_task", 4096, this, 5, nullptr);
     }
 
     void InitializeButtons() {
@@ -118,9 +82,10 @@ private:
         tw_button_.OnClick([this]() {
             ESP_LOGI(TAG, "TW button clicked");
             auto& app = Application::GetInstance();
-            app.Schedule([&app]() {
-                app.HandleWakeWordDetected(app.GetWakeWordDetect().GetLastDetectedWakeWord());
-            });
+            // 使用已存在的方法，模拟唤醒词触发
+            app.StartListening();
+            // 或者切换聊天状态
+            // app.ToggleChatState();
         });
         
         ESP_LOGI(TAG, "Buttons initialization completed");
@@ -136,8 +101,19 @@ private:
         thing_manager.AddThing(iot::CreateThing("PressToTalk"));
     }
 
+    #if ENABLE_BLE_SHUTTER
+    void InitializeBleShutter() {
+        ESP_LOGI(TAG, "Starting BLE Shutter Demo...");
+        StartBleShutterDemo();  // 直接调用函数
+        ESP_LOGI(TAG, "BLE Shutter Demo started");
+    }
+    #endif
+
 public:
-    XminiC3Board() : boot_button_(BOOT_BUTTON_GPIO), tw_button_(TW_BUTTON_GPIO) {  
+    XminiC3Board() 
+        : boot_button_(BOOT_BUTTON_GPIO), 
+          tw_button_(TW_BUTTON_GPIO)
+    {  
         ESP_LOGI(TAG, "Initializing XminiC3Board...");
         // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
         esp_efuse_write_field_bit(ESP_EFUSE_VDD_SPI_AS_GPIO);
@@ -153,15 +129,16 @@ public:
         gpio_config(&io_conf);
 
         InitializeCodecI2c();
-        InitializeRc522();
         InitializeButtons();
         InitializeIot();
+        
+        #if ENABLE_BLE_SHUTTER
+        InitializeBleShutter();
+        #endif
     }
 
     ~XminiC3Board() {
-        if (rc522_) {
-            delete rc522_;
-        }
+        // 移除 ble_shutter_ 清理代码
     }
 
     virtual Led* GetLed() override {

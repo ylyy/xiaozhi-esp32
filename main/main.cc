@@ -7,8 +7,11 @@
 
 #include "application.h"
 #include "system_info.h"
+#include "ble_shutter_demo.h"
 
 #define TAG "main"
+
+extern void StartBleShutterDemo();
 
 extern "C" void app_main(void)
 {
@@ -23,6 +26,9 @@ extern "C" void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // 启动BLE Shutter演示
+    StartBleShutterDemo();
 
     // Launch the application
     Application::GetInstance().Start();

@@ -20,6 +20,8 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "settings.cc"
             "background_task.cc"
             "csi/csi_detector.cc"
+            "ble_shutter.cc"
+            "ble_shutter_demo.cc"
             "main.cc"
             )
 
