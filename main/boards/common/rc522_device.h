@@ -90,4 +90,4 @@ private:
     gpio_num_t irq_pin_;   // 中断信号
     spi_device_handle_t spi_device_;
     bool spi_initialized_;
-}; 
+};
