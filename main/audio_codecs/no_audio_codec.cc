@@ -296,7 +296,21 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
 			#endif
 
         },
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
+
+        },
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = spk_bclk,
@@ -388,7 +402,11 @@ int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
     samples = bytes_read / sizeof(int16_t);
 
     // 将 16 位数据直接复制到目标缓冲区
-    memcpy(dest, bit16_buffer.data(), samples * sizeof(int16_t));
+    for (int i = 0; i < samples; i++) {
+        int32_t value = bit16_buffer[i] << 5;
+        dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    //memcpy(dest, bit16_buffer.data(), samples * sizeof(int16_t));
 
     return samples;
 }
