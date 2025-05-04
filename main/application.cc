@@ -85,7 +85,7 @@ void Application::CheckNewVersion() {
         retry_count = 0;
 
         if (0) {
-            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
+            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_SUCCESS);
             // Wait for the chat state to be idle
             do {
                 vTaskDelay(pdMS_TO_TICKS(3000));

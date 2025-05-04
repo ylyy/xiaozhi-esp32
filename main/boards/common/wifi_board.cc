@@ -42,7 +42,7 @@ void WifiBoard::EnterWifiConfigMode() {
 
     auto& wifi_ap = WifiConfigurationAp::GetInstance();
     wifi_ap.SetLanguage(Lang::CODE);
-    wifi_ap.SetSsidPrefix("Xiaozhi");
+    wifi_ap.SetSsidPrefix("galatea");
     wifi_ap.Start();
 
     // 显示 WiFi 配置 AP 的 SSID 和 Web 服务器 URL
@@ -94,8 +94,17 @@ void WifiBoard::StartNetwork() {
     });
     wifi_station.OnConnected([this](const std::string& ssid) {
         auto display = Board::GetInstance().GetDisplay();
+        
+        // 获取并打印设备ID (UUID和MAC地址)
+        auto& board_instance = Board::GetInstance();
+        std::string uuid = board_instance.GetUuid();
+        std::string mac_address = SystemInfo::GetMacAddress();
+        
+        ESP_LOGI(TAG, "设备ID信息 - UUID: %s, MAC地址: %s", uuid.c_str(), mac_address.c_str());
+        
         std::string notification = Lang::Strings::CONNECTED_TO;
         notification += ssid;
+        notification += "\nID: " + mac_address;
         display->ShowNotification(notification.c_str(), 30000);
     });
     wifi_station.Start();
